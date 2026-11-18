@@ -102,20 +102,10 @@ fn list_releases(platform: String) -> Result<Vec<LoaderRelease>, String> {
     fetch_releases(&platform)
 }
 
-fn is_flavor_asset(name: &str, platform: &str, flavor: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    let extension_ok = if platform == "windows" {
-        lower.ends_with(".zip")
-    } else {
-        lower.ends_with(".apk")
-    };
-    extension_ok && lower.contains(flavor)
-}
-
-fn choose_release(
-    releases: &[LoaderRelease],
+fn choose_release<'a>(
+    releases: &'a [LoaderRelease],
     flavor: &str,
-) -> Result<(&LoaderRelease, &ReleaseAsset), String> {
+) -> Result<(&'a LoaderRelease, &'a ReleaseAsset), String> {
     let preferred_pre = flavor == "dev";
     for release in releases {
         if release.prerelease == preferred_pre {
