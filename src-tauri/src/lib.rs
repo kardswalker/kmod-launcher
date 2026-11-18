@@ -56,6 +56,14 @@ pub struct InstallResult {
     pub installed: bool,
     pub detail: String,
     pub sha256: String,
+    pub backup_path: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameInstall {
+    pub path: String,
+    pub label: String,
 }
 
 fn repository(platform: &str) -> Result<&'static str, String> {
@@ -100,6 +108,52 @@ fn fetch_releases(platform: &str) -> Result<Vec<LoaderRelease>, String> {
 #[tauri::command]
 fn list_releases(platform: String) -> Result<Vec<LoaderRelease>, String> {
     fetch_releases(&platform)
+}
+
+fn is_kards_win64(path: &Path) -> bool {
+    path.join("kards-Win64-Shipping.exe").is_file()
+}
+
+#[tauri::command]
+fn detect_windows_games() -> Vec<GameInstall> {
+    #[cfg(not(target_os = "windows"))]
+    return Vec::new();
+
+    #[cfg(target_os = "windows")]
+    {
+        let mut roots = Vec::new();
+        for key in ["ProgramFiles", "ProgramFiles(x86)", "PUBLIC"] {
+            if let Some(root) = std::env::var_os(key) {
+                roots.push(PathBuf::from(root));
+            }
+        }
+        roots.extend([
+            PathBuf::from(r"C:\SteamLibrary"),
+            PathBuf::from(r"D:\SteamLibrary"),
+            PathBuf::from(r"E:\SteamLibrary"),
+        ]);
+        let mut found = Vec::new();
+        for root in roots {
+            for candidate in [
+                root.join(r"Steam\steamapps\common\KARDS\kards\Binaries\Win64"),
+                root.join(r"steamapps\common\KARDS\kards\Binaries\Win64"),
+            ] {
+                if is_kards_win64(&candidate) {
+                    let text = candidate.to_string_lossy().into_owned();
+                    if !found
+                        .iter()
+                        .any(|game: &GameInstall| game.path.eq_ignore_ascii_case(&text))
+                    {
+                        found.push(GameInstall {
+                            path: text,
+                            label: "KARDS".into(),
+                        });
+                    }
+                }
+            }
+        }
+        found
+    }
 }
 
 fn choose_release<'a>(
@@ -192,6 +246,27 @@ fn extract_windows(zip_path: &Path, target: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn backup_existing_proxy(target: &Path) -> Result<Option<String>, String> {
+    let proxy = target.join("dwmapi.dll");
+    if !proxy.is_file() {
+        return Ok(None);
+    }
+    let mut backup = target.join("dwmapi.dll.kmod-backup");
+    if backup.exists() {
+        let mut index = 1;
+        loop {
+            let candidate = target.join(format!("dwmapi.dll.kmod-backup-{index}"));
+            if !candidate.exists() {
+                backup = candidate;
+                break;
+            }
+            index += 1;
+        }
+    }
+    fs::copy(&proxy, &backup).map_err(|e| format!("cannot back up existing dwmapi.dll: {e}"))?;
+    Ok(Some(backup.to_string_lossy().into_owned()))
+}
+
 #[tauri::command]
 fn install_loader(
     app: tauri::AppHandle,
@@ -210,19 +285,25 @@ fn install_loader(
         let target = target_path
             .filter(|p| !p.trim().is_empty())
             .ok_or("Windows installation requires the KARDS\nBinaries\\Win64 directory")?;
-        extract_windows(&path, Path::new(&target))?;
+        let target = Path::new(&target);
+        if !is_kards_win64(target) {
+            return Err("selected directory does not contain kards-Win64-Shipping.exe".into());
+        }
+        let backup_path = backup_existing_proxy(target)?;
+        extract_windows(&path, target)?;
         Ok(InstallResult {
             platform,
             flavor,
             version: release.tag_name.clone(),
             asset_name: asset.name.clone(),
-            path: target,
+            path: target.to_string_lossy().into_owned(),
             installed: true,
             detail: "KMod Loader installed next to the KARDS executable".into(),
             sha256,
+            backup_path,
         })
     } else {
-        Ok(InstallResult { platform, flavor, version: release.tag_name.clone(), asset_name: asset.name.clone(), path: path.to_string_lossy().into_owned(), installed: false, detail: "APK downloaded. Open the file with Android's package installer to finish installation.".into(), sha256 })
+        Ok(InstallResult { platform, flavor, version: release.tag_name.clone(), asset_name: asset.name.clone(), path: path.to_string_lossy().into_owned(), installed: false, detail: "APK downloaded. Open the file with Android's package installer to finish installation.".into(), sha256, backup_path: None })
     }
 }
 
@@ -246,7 +327,8 @@ pub fn run() {
             list_releases,
             install_loader,
             default_flavor,
-            open_installer
+            open_installer,
+            detect_windows_games
         ])
         .run(tauri::generate_context!())
         .expect("error while running KMod Launcher");
