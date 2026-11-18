@@ -45,8 +45,9 @@ export default function App() {
     }).catch(() => setDetectedGames([]));
   }, [platform]);
 
-  const preferred = releases.find((release) => release.prerelease === (flavor === "dev") && release.assets.some((asset) => asset.name.toLowerCase().includes(flavor)))
-    ?? releases.find((release) => release.assets.some((asset) => asset.name.toLowerCase().includes(flavor)));
+  const assetMatches = (release: Release) => release.assets.some((asset) => asset.name.toLowerCase().includes(flavor) || (flavor === "release" && asset.name.toLowerCase().match(/\.(apk|zip)$/)));
+  const preferred = releases.find((release) => release.prerelease === (flavor === "dev") && assetMatches(release))
+    ?? releases.find(assetMatches);
 
   const chooseTarget = async () => {
     const selected = await open({ directory: true, multiple: false, title: "选择 KARDS\\Binaries\\Win64 目录" });
@@ -68,7 +69,7 @@ export default function App() {
     <section className="panel">
       <div className="section-heading"><div><p className="eyebrow">INSTALLER</p><h2>安装 KMod Loader</h2></div><span className="platform">{platformLabel[platform]}</span></div>
       <div className="flavors"><button className={flavor === "release" ? "selected" : ""} onClick={() => setFlavor("release")}><strong>Release</strong><span>推荐，适合日常使用</span></button><button className={flavor === "dev" ? "selected dev" : "dev"} onClick={() => setFlavor("dev")}><strong>Dev</strong><span>开发版，包含调试功能</span></button></div>
-      <div className="release-card"><div><span className="label">默认版本</span><h3>{preferred?.name || "等待 release 信息"}</h3><p>{preferred ? `${preferred.tagName} · ${preferred.assets.find((asset) => asset.name.toLowerCase().includes(flavor))?.name || "未匹配资产"}` : message}</p></div><button className="ghost" onClick={() => void refresh()} disabled={loading}>刷新</button></div>
+      <div className="release-card"><div><span className="label">默认版本</span><h3>{preferred?.name || "等待 release 信息"}</h3><p>{preferred ? `${preferred.tagName} · ${preferred.assets.find((asset) => asset.name.toLowerCase().includes(flavor) || (flavor === "release" && asset.name.toLowerCase().match(/\.(apk|zip)$/)))?.name || "未匹配资产"}` : message}</p></div><button className="ghost" onClick={() => void refresh()} disabled={loading}>刷新</button></div>
       {platform === "windows" && <div className="path-block"><div className="path-row"><input value={target} onChange={(event) => setTarget(event.target.value)} placeholder="KARDS\\Binaries\\Win64 目录" /><button className="ghost" onClick={() => void chooseTarget()}>选择目录</button></div>{detectedGames.length > 0 && <div className="detected">自动发现：{detectedGames.map((game) => <button key={game.path} onClick={() => setTarget(game.path)}>{game.path}</button>)}</div>}</div>}
       <button className="primary" onClick={() => void install()} disabled={loading || !preferred}>{loading ? "处理中…" : platform === "android" ? "下载并准备安装 APK" : `安装 ${flavor} Loader`}</button>
       <p className="status">{message}</p>

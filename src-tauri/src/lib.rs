@@ -8,7 +8,7 @@ use std::{
 use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
-const WINDOWS_REPO: &str = "kardswalker/KMod-Loader-Windows";
+const WINDOWS_REPO: &str = "CCB-TEAM/KMod-Loader-Windows";
 const ANDROID_REPO: &str = "CCB-TEAM/KMod-Loader-Android";
 
 #[derive(Clone, Serialize)]
@@ -169,6 +169,24 @@ fn choose_release<'a>(
                 .find(|asset| asset.name.to_ascii_lowercase().contains(flavor))
             {
                 return Ok((release, asset));
+            }
+            if flavor == "release" {
+                let extension = if release
+                    .assets
+                    .iter()
+                    .any(|asset| asset.name.ends_with(".zip"))
+                {
+                    ".zip"
+                } else {
+                    ".apk"
+                };
+                if let Some(asset) = release
+                    .assets
+                    .iter()
+                    .find(|asset| asset.name.to_ascii_lowercase().ends_with(extension))
+                {
+                    return Ok((release, asset));
+                }
             }
         }
     }
