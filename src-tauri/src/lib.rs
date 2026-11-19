@@ -4,12 +4,25 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Component, Path, PathBuf},
+    sync::OnceLock,
+    time::Duration,
 };
 use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
 const WINDOWS_REPO: &str = "CCB-TEAM/KMod-Loader-Windows";
 const ANDROID_REPO: &str = "CCB-TEAM/KMod-Loader-Android";
+
+fn http_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::AgentBuilder::new()
+            .redirects(5)
+            .timeout_connect(Duration::from_secs(30))
+            .timeout_read(Duration::from_secs(60))
+            .build()
+    })
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,7 +90,8 @@ fn repository(platform: &str) -> Result<&'static str, String> {
 fn fetch_releases(platform: &str) -> Result<Vec<LoaderRelease>, String> {
     let repo = repository(platform)?;
     let url = format!("https://api.github.com/repos/{repo}/releases?per_page=30");
-    let response = ureq::get(&url)
+    let response = http_agent()
+        .get(&url)
         .set("Accept", "application/vnd.github+json")
         .set("User-Agent", "kmod-launcher/0.1")
         .call()
@@ -170,23 +184,25 @@ fn choose_release<'a>(
             {
                 return Ok((release, asset));
             }
-            if flavor == "release" {
-                let extension = if release
-                    .assets
-                    .iter()
-                    .any(|asset| asset.name.ends_with(".zip"))
-                {
-                    ".zip"
-                } else {
-                    ".apk"
-                };
-                if let Some(asset) = release
-                    .assets
-                    .iter()
-                    .find(|asset| asset.name.to_ascii_lowercase().ends_with(extension))
-                {
-                    return Ok((release, asset));
-                }
+        }
+    }
+    if flavor == "release" {
+        for release in releases {
+            let extension = if release
+                .assets
+                .iter()
+                .any(|asset| asset.name.to_ascii_lowercase().ends_with(".zip"))
+            {
+                ".zip"
+            } else {
+                ".apk"
+            };
+            if let Some(asset) = release
+                .assets
+                .iter()
+                .find(|asset| asset.name.to_ascii_lowercase().ends_with(extension))
+            {
+                return Ok((release, asset));
             }
         }
     }
@@ -204,7 +220,8 @@ fn cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn download(url: &str, path: &Path) -> Result<String, String> {
-    let response = ureq::get(url)
+    let response = http_agent()
+        .get(url)
         .set("User-Agent", "kmod-launcher/0.1")
         .call()
         .map_err(|e| format!("download failed: {e}"))?;
@@ -337,6 +354,7 @@ fn open_installer(app: tauri::AppHandle, path: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
