@@ -4,3 +4,4 @@ dist/
 src/dist/
 src-tauri/gen/
 .pnpm-store/
+android-*.png
